@@ -18,12 +18,9 @@ namespace
 bool GLContext::load(bool standalone) {
     this->standalone = standalone;
 
-    int width = 1;
-    int height = 1;
-
     EGLDisplay dpy = eglGetCurrentDisplay();
 
-    if (!dpy) {
+    if (dpy == EGL_NO_DISPLAY) {
         PyErr_Format(moderngl_error, "cannot detect the display");
         return false;
     }
