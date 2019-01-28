@@ -1,171 +1,140 @@
 #include "gl_context.hpp"
 #include "../modules.hpp"
 
-#include <GL/glx.h>
-#include <GL/gl.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <iostream>
 
-#define GLX_CONTEXT_MAJOR_VERSION 0x2091
-#define GLX_CONTEXT_MINOR_VERSION 0x2092
-#define GLX_CONTEXT_PROFILE_MASK 0x9126
-#define GLX_CONTEXT_CORE_PROFILE_BIT 0x0001
-
-typedef GLXContext (* GLXCREATECONTEXTATTRIBSARBPROC)(Display * display, GLXFBConfig config, GLXContext context, Bool direct, const int * attribs);
-
-int SilentXErrorHandler(Display * d, XErrorEvent * e) {
-    return 0;
+namespace
+{
+    constexpr EGLint attrib_list[] =
+    {
+        EGL_SURFACE_TYPE,       EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE,    EGL_OPENGL_BIT,
+        EGL_NONE
+    };
 }
 
 bool GLContext::load(bool standalone) {
     this->standalone = standalone;
 
-    if (standalone) {
-        int width = 1;
-        int height = 1;
+    int width = 1;
+    int height = 1;
 
-        Display * dpy = XOpenDisplay(0);
-
-        if (!dpy) {
-            dpy = XOpenDisplay(":0.0");
-        }
-
-        if (!dpy) {
-            PyErr_Format(moderngl_error, "cannot detect the display");
-            return context;
-        }
-
-        int nelements = 0;
-
-        GLXFBConfig * fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), 0, &nelements);
-
-        if (!fbc) {
-            PyErr_Format(moderngl_error, "cannot read the display configuration");
-            XCloseDisplay(dpy);
-            return context;
-        }
-
-        static int attributeList[] = {
-            GLX_RGBA,
-            GLX_DOUBLEBUFFER,
-            GLX_RED_SIZE, 8,
-            GLX_GREEN_SIZE, 8,
-            GLX_BLUE_SIZE, 8,
-            GLX_DEPTH_SIZE, 24,
-            None,
-        };
-
-        XVisualInfo * vi = glXChooseVisual(dpy, DefaultScreen(dpy), attributeList);
-
-        if (!vi) {
-            XCloseDisplay(dpy);
-
-            PyErr_Format(moderngl_error, "cannot choose a visual info");
-            return context;
-        }
-
-        XSetWindowAttributes swa;
-        swa.colormap = XCreateColormap(dpy, RootWindow(dpy, vi->screen), vi->visual, AllocNone);
-        swa.border_pixel = 0;
-        swa.event_mask = StructureNotifyMask;
-
-        Window win = XCreateWindow(dpy, RootWindow(dpy, vi->screen), 0, 0, width, height, 0, vi->depth, InputOutput, vi->visual, CWBorderPixel | CWColormap | CWEventMask, &swa);
-
-        if (!win) {
-            XCloseDisplay(dpy);
-
-            PyErr_Format(moderngl_error, "cannot create window");
-            return context;
-        }
-
-        // XMapWindow(dpy, win);
-
-        GLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddress((const GLubyte *)"glXCreateContextAttribsARB");
-
-        GLXContext ctx = 0;
-
-        XSetErrorHandler(SilentXErrorHandler);
-
-        if (glXCreateContextAttribsARB) {
-            for (int i = 0; i < versions; ++i) {
-                int attribs[] = {
-                    GLX_CONTEXT_PROFILE_MASK, GLX_CONTEXT_CORE_PROFILE_BIT,
-                    GLX_CONTEXT_MAJOR_VERSION, version[i].major,
-                    GLX_CONTEXT_MINOR_VERSION, version[i].minor,
-                    0, 0,
-                };
-
-                ctx = glXCreateContextAttribsARB(dpy, *fbc, 0, true, attribs);
-
-                if (ctx) {
-                    break;
-                }
-            }
-        }
-
-        if (!ctx) {
-            ctx = glXCreateContext(dpy, vi, 0, GL_TRUE);
-        }
-
-        if (!ctx) {
-            XDestroyWindow(dpy, win);
-            XCloseDisplay(dpy);
-
-            PyErr_Format(moderngl_error, "cannot create OpenGL context");
-            return context;
-        }
-
-        XSetErrorHandler(0);
-
-        int make_current = glXMakeCurrent(dpy, win, ctx);
-
-        if (!make_current) {
-            glXDestroyContext(dpy, ctx);
-            XDestroyWindow(dpy, win);
-            XCloseDisplay(dpy);
-
-            PyErr_Format(moderngl_error, "cannot select OpenGL context");
-            return context;
-        }
-    }
-
-    Display * dpy = glXGetCurrentDisplay();
+    EGLDisplay dpy = eglGetCurrentDisplay();
 
     if (!dpy) {
-        PyErr_Format(moderngl_error, "cannot detect display");
+        PyErr_Format(moderngl_error, "cannot detect the display");
         return false;
     }
 
-    Window win = glXGetCurrentDrawable();
+    EGLint egl_major_ver;
+    EGLint egl_minor_ver;
+    if(eglInitialize(display, &egl_major_ver, &egl_minor_ver) == EGL_FALSE)
+    {
+        EGLint error = eglGetError();
+        switch(error)
+        {
+        case EGL_BAD_DISPLAY:
+            PyErr_Format(moderngl_error, "display is not an EGL display connection");
+            break;
+        case EGL_NOT_INITIALIZED:
+            PyErr_Format(moderngl_error, "display cannot be initialized");
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+    
+    std::cout << "EGL version: " << egl_major_ver << "." << egl_minor_ver << std::endl;
 
-    if (!win) {
-        PyErr_Format(moderngl_error, "cannot detect window");
+    char const * client_apis = eglQueryString(display, EGL_CLIENT_APIS);
+    if(!client_apis)
+    {
+        PyErr_Format(moderngl_error,"Failed to eglQueryString(display, EGL_CLIENT_APIS)");
+        return false;
+    }
+    
+    std::cout << "Supported client rendering APIs: " << client_apis << std::endl;
+
+    EGLConfig config;
+    EGLint    num_config;
+    if(eglChooseConfig(display, attrib_list, &config, 1, &num_config) == EGL_FALSE)
+    {
+        PyErr_Format(moderngl_error,"Failed to eglChooseConfig");
+        return false;
+    }
+    if(num_config < 1)
+    {
+        PyErr_Format(moderngl_error,"No matching EGL frame buffer configuration");
         return false;
     }
 
-    GLXContext ctx = glXGetCurrentContext();
-
-    if (!ctx) {
-        PyErr_Format(moderngl_error, "cannot detect OpenGL context");
+    if(eglBindAPI(EGL_OPENGL_API) == EGL_FALSE)
+    {
+        PyErr_Format(moderngl_error,"Failed to eglBindAPI(EGL_OPENGL_API)");
         return false;
     }
 
-    this->window = (void *)win;
-    this->display = (void *)dpy;
-    this->context = (void *)ctx;
+    const EGLint context_attrib[] =
+    {
+        EGL_CONTEXT_MAJOR_VERSION_KHR,  4,
+        EGL_CONTEXT_MINOR_VERSION_KHR,  6,
+        EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR,    EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR,
+        EGL_CONTEXT_FLAGS_KHR,          EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE_BIT_KHR,
+        EGL_NONE
+    };
+
+    EGLContext egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrib);
+    if(egl_ctx == EGL_NO_CONTEXT)
+    {
+        EGLint error =  eglGetError();
+        switch(error)
+        {
+        case EGL_BAD_CONFIG:
+            PyErr_Format(moderngl_error,"config is not an EGL frame buffer configuration, or does not support the current rendering API");
+            break;
+        case EGL_BAD_ATTRIBUTE:
+            PyErr_Format(moderngl_error,"attrib_list contains an invalid context attribute or if an attribute is not recognized or out of range");
+            break;
+        default:
+            PyErr_Format(moderngl_error,"Unknown error");
+            break;
+        }
+        return false;
+    }
+
+    if(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx) == EGL_FALSE)
+    {
+        PyErr_Format(moderngl_error,"Failed to eglMakeCurrent");
+        return false;
+    }
+
+    if(EGL_SUCCESS != eglGetError())
+    {
+        PyErr_Format(moderngl_error,"eglGetError != EGL_SUCCESS");
+        return false;
+    }
+
+    this->window = nullptr; // no window!
+    this->display = (void *)display;
+    this->context = (void *)egl_ctx;
 
     return true;
 }
 
 void GLContext::enter() {
-    this->old_display = (void *)glXGetCurrentDisplay();
-    this->old_window = (void *)glXGetCurrentDrawable();
-    this->old_context = (void *)glXGetCurrentContext();
-    glXMakeCurrent((Display *)this->display, (Window)this->window, (GLXContext)this->context);
+    this->old_display = (void *)eglGetCurrentDisplay();
+    this->old_window = nullptr;
+    this->old_context = (void *)eglGetCurrentContext();
+    eglMakeCurrent((EGLDisplay) this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, (EGLContext) this->context);
 }
 
 void GLContext::exit() {
-    glXMakeCurrent((Display *)this->old_display, (Window)this->old_window, (GLXContext)this->old_context);
+    eglMakeCurrent((EGLDisplay) this->old_display, EGL_NO_SURFACE, EGL_NO_SURFACE, (EGLContext) this->old_context);
 }
 
 bool GLContext::active() {
-    return this->context == glXGetCurrentContext();
+    return this->context == eglGetCurrentContext();
 }
