@@ -558,35 +558,31 @@ void DestroyGLContext(const GLContext & context) {
 
 #else
 
-#include <GL/glx.h>
-#include <GL/gl.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 
-#define GLX_CONTEXT_MAJOR_VERSION 0x2091
-#define GLX_CONTEXT_MINOR_VERSION 0x2092
-#define GLX_CONTEXT_PROFILE_MASK 0x9126
-#define GLX_CONTEXT_CORE_PROFILE_BIT 0x0001
-
-typedef GLXContext (* GLXCREATECONTEXTATTRIBSARBPROC)(Display * display, GLXFBConfig config, GLXContext context, Bool direct, const int * attribs);
+namespace
+{
+    constexpr EGLint attrib_list[] =
+    {
+        EGL_SURFACE_TYPE,       EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE,    EGL_OPENGL_BIT,
+        EGL_NONE
+    };
+}
 
 GLContext LoadCurrentGLContext() {
 	GLContext context = {};
 	context.standalone = false;
 
-	Display * dpy = glXGetCurrentDisplay();
+	EGLDisplay * dpy = eglGetCurrentDisplay();
 
 	if (!dpy) {
 		MGLError_Set("cannot detect display");
 		return context;
 	}
-
-	Window win = glXGetCurrentDrawable();
-
-	if (!win) {
-		MGLError_Set("cannot detect window");
-		return context;
-	}
-
-	GLXContext ctx = glXGetCurrentContext();
+	
+	EGLContext ctx = eglGetCurrentContext();
 
 	if (!ctx) {
 		MGLError_Set("cannot detect OpenGL context");
@@ -594,14 +590,10 @@ GLContext LoadCurrentGLContext() {
 	}
 
 	context.display = (void *)dpy;
-	context.window = (void *)win;
+	context.window = nullptr;
 	context.context = (void *)ctx;
 
 	return context;
-}
-
-int SilentXErrorHandler(Display * d, XErrorEvent * e) {
-    return 0;
 }
 
 GLContext CreateGLContext(PyObject * settings) {
@@ -619,113 +611,112 @@ GLContext CreateGLContext(PyObject * settings) {
 		height = height < 1 ? height : 1;
 	}
 
-	Display * dpy = XOpenDisplay(0);
+	auto display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if(display == EGL_NO_DISPLAY)
+    {
+        MGLError_Set("Failed to eglGetDisplay(EGL_DEFAULT_DISPLAY)");
+        return context;
+    }
 
-	if (!dpy) {
-		dpy = XOpenDisplay(":0.0");
-	}
+    EGLint egl_major_ver;
+    EGLint egl_minor_ver;
+    if(eglInitialize(display, &egl_major_ver, &egl_minor_ver) == EGL_FALSE)
+    {
+        MGLError_Set("Failed to eglInitialize");
+		EGLint error =  eglGetError();
+        switch(error)
+        {
+        case EGL_BAD_DISPLAY:
+            MGLError_Set("display is not an EGL display connection");
+            break;
+        case EGL_NOT_INITIALIZED:
+            MGLError_Set("display cannot be initialized");
+            break;
+        default:
+            break;
+        }
+        return context;
+    }
+    cout << "EGL version: " << egl_major_ver << "." << egl_minor_ver << endl;
 
-	if (!dpy) {
-		MGLError_Set("cannot detect the display");
-		return context;
-	}
+    char const * client_apis = eglQueryString(display, EGL_CLIENT_APIS);
+    if(!client_apis)
+    {
+        MGLError_Set("Failed to eglQueryString(display, EGL_CLIENT_APIS)");
+        return context;
+    }
+    cout << "Supported client rendering APIs: " << client_apis << endl;
 
-	int nelements = 0;
+    EGLConfig config;
+    EGLint    num_config;
+    if(eglChooseConfig(display, attrib_list, &config, 1, &num_config) == EGL_FALSE)
+    {
+        MGLError_Set("Failed to eglChooseConfig");
+        return context;
+    }
+    if(num_config < 1)
+    {
+        MGLError_Set("No matching EGL frame buffer configuration");
+        return context;
+    }
 
-	GLXFBConfig * fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), 0, &nelements);
+    if(eglBindAPI(EGL_OPENGL_API) == EGL_FALSE)
+    {
+        MGLError_Set("Failed to eglBindAPI(EGL_OPENGL_API)");
+        return context;
+    }
 
-	if (!fbc) {
-		MGLError_Set("cannot read the display configuration");
-		XCloseDisplay(dpy);
-		return context;
-	}
+    const EGLint context_attrib[] =
+    {
+        EGL_CONTEXT_MAJOR_VERSION_KHR,  4,
+        EGL_CONTEXT_MINOR_VERSION_KHR,  6,
+        EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR,    EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR,
+        EGL_CONTEXT_FLAGS_KHR,          EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE_BIT_KHR,
+        EGL_NONE
+    };
 
-	static int attributeList[] = {
-		GLX_RGBA,
-		GLX_DOUBLEBUFFER,
-		GLX_RED_SIZE, 8,
-		GLX_GREEN_SIZE, 8,
-		GLX_BLUE_SIZE, 8,
-		GLX_DEPTH_SIZE, 24,
-		None,
-	};
+    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrib);
+    if(context == EGL_NO_CONTEXT)
+    {
+        cerr << "Failed to eglCreateContext" << endl;
+        EGLint error =  eglGetError();
+        switch(error)
+        {
+        case EGL_BAD_CONFIG:
+            MGLError_Set("config is not an EGL frame buffer configuration, or does not support the current rendering API");
+            break;
+        case EGL_BAD_ATTRIBUTE:
+            MGLError_Set("attrib_list contains an invalid context attribute or if an attribute is not recognized or out of range");
+            break;
+        default:
+            MGLError_Set("Unknown error");
+            break;
+        }
+        return context;
+    }
 
-	XVisualInfo * vi = glXChooseVisual(dpy, DefaultScreen(dpy), attributeList);
+    if(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context) == EGL_FALSE)
+    {
+        MGLError_Set("Failed to eglMakeCurrent");
+        return context;
+    }
 
-	if (!vi) {
-		XCloseDisplay(dpy);
+    GLenum err = glewInit();
+    if (GLEW_OK != err)
+    {
+        MGLError_Set("Failed to glewInit");
+        return context;
+    }
 
-		MGLError_Set("cannot choose a visual info");
-		return context;
-	}
+    if(EGL_SUCCESS != eglGetError())
+    {
+		MGLError_Set("eglGetError != EGL_SUCCESS");
+        return context;
+    }
 
-	XSetWindowAttributes swa;
-	swa.colormap = XCreateColormap(dpy, RootWindow(dpy, vi->screen), vi->visual, AllocNone);
-	swa.border_pixel = 0;
-	swa.event_mask = StructureNotifyMask;
-
-	Window win = XCreateWindow(dpy, RootWindow(dpy, vi->screen), 0, 0, width, height, 0, vi->depth, InputOutput, vi->visual, CWBorderPixel | CWColormap | CWEventMask, &swa);
-
-	if (!win) {
-		XCloseDisplay(dpy);
-
-		MGLError_Set("cannot create window");
-		return context;
-	}
-
-	// XMapWindow(dpy, win);
-
-	GLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddress((const GLubyte *)"glXCreateContextAttribsARB");
-
-	GLXContext ctx = 0;
-
-	XSetErrorHandler(SilentXErrorHandler);
-
-	if (glXCreateContextAttribsARB) {
-		for (int i = 0; i < versions; ++i) {
-			int attribs[] = {
-				GLX_CONTEXT_PROFILE_MASK, GLX_CONTEXT_CORE_PROFILE_BIT,
-				GLX_CONTEXT_MAJOR_VERSION, version[i].major,
-				GLX_CONTEXT_MINOR_VERSION, version[i].minor,
-				0, 0,
-			};
-
-			ctx = glXCreateContextAttribsARB(dpy, *fbc, 0, true, attribs);
-
-			if (ctx) {
-				break;
-			}
-		}
-	}
-
-	if (!ctx) {
-		ctx = glXCreateContext(dpy, vi, 0, GL_TRUE);
-	}
-
-	if (!ctx) {
-		XDestroyWindow(dpy, win);
-		XCloseDisplay(dpy);
-
-		MGLError_Set("cannot create OpenGL context");
-		return context;
-	}
-
-	XSetErrorHandler(0);
-
-	int make_current = glXMakeCurrent(dpy, win, ctx);
-
-	if (!make_current) {
-		glXDestroyContext(dpy, ctx);
-		XDestroyWindow(dpy, win);
-		XCloseDisplay(dpy);
-
-		MGLError_Set("cannot select OpenGL context");
-		return context;
-	}
-
-	context.display = (void *)dpy;
-	context.window = (void *)win;
-	context.context = (void *)ctx;
+    context.display = (void *) display;
+	context.window = nullptr;
+	context.context = (void *) context;
 
 	return context;
 }
@@ -736,20 +727,21 @@ void DestroyGLContext(const GLContext & context) {
 	}
 
 	if (context.display) {
-		glXMakeCurrent((Display *)context.display, 0, 0);
 
-		if (context.context) {
-			glXDestroyContext((Display *)context.display, (GLXContext)context.context);
-			// context.context = 0;
+		if(eglMakeCurrent(context.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) == EGL_FALSE)
+		{
+			MGLError_Set("Failed to eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)");
 		}
 
-		if (context.window) {
-			XDestroyWindow((Display *)context.display, (Window)context.window);
-			// context.window = 0;
+		if(eglDestroyContext(context.display, context.context) == EGL_FALSE)
+		{
+			MGLError_Set("Failed to eglDestroyContext(context.display, context.context)");
 		}
 
-		XCloseDisplay((Display *)context.display);
-		// context.display = 0;
+		if(eglTerminate(display) == EGL_FALSE)
+		{
+			MGLError_Set("Failed to eglTerminate");
+		}
 	}
 }
 
