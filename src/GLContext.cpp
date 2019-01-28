@@ -560,6 +560,7 @@ void DestroyGLContext(const GLContext & context) {
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <iostream>
 
 namespace
 {
@@ -575,13 +576,12 @@ GLContext LoadCurrentGLContext() {
 	GLContext context = {};
 	context.standalone = false;
 
-	EGLDisplay * dpy = eglGetCurrentDisplay();
+	EGLDisplay dpy = eglGetCurrentDisplay();
 
 	if (!dpy) {
 		MGLError_Set("cannot detect display");
 		return context;
 	}
-	
 	EGLContext ctx = eglGetCurrentContext();
 
 	if (!ctx) {
@@ -637,7 +637,7 @@ GLContext CreateGLContext(PyObject * settings) {
         }
         return context;
     }
-    cout << "EGL version: " << egl_major_ver << "." << egl_minor_ver << endl;
+    std::cout << "EGL version: " << egl_major_ver << "." << egl_minor_ver << std::endl;
 
     char const * client_apis = eglQueryString(display, EGL_CLIENT_APIS);
     if(!client_apis)
@@ -645,7 +645,7 @@ GLContext CreateGLContext(PyObject * settings) {
         MGLError_Set("Failed to eglQueryString(display, EGL_CLIENT_APIS)");
         return context;
     }
-    cout << "Supported client rendering APIs: " << client_apis << endl;
+    std::cout << "Supported client rendering APIs: " << client_apis << std::endl;
 
     EGLConfig config;
     EGLint    num_config;
@@ -675,10 +675,10 @@ GLContext CreateGLContext(PyObject * settings) {
         EGL_NONE
     };
 
-    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrib);
-    if(context == EGL_NO_CONTEXT)
+    EGLContext egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrib);
+    if(egl_ctx == EGL_NO_CONTEXT)
     {
-        cerr << "Failed to eglCreateContext" << endl;
+        std::cerr << "Failed to eglCreateContext" << std::endl;
         EGLint error =  eglGetError();
         switch(error)
         {
@@ -695,16 +695,9 @@ GLContext CreateGLContext(PyObject * settings) {
         return context;
     }
 
-    if(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context) == EGL_FALSE)
+    if(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx) == EGL_FALSE)
     {
         MGLError_Set("Failed to eglMakeCurrent");
-        return context;
-    }
-
-    GLenum err = glewInit();
-    if (GLEW_OK != err)
-    {
-        MGLError_Set("Failed to glewInit");
         return context;
     }
 
@@ -716,7 +709,7 @@ GLContext CreateGLContext(PyObject * settings) {
 
     context.display = (void *) display;
 	context.window = nullptr;
-	context.context = (void *) context;
+	context.context = (void *) egl_ctx;
 
 	return context;
 }
@@ -738,7 +731,7 @@ void DestroyGLContext(const GLContext & context) {
 			MGLError_Set("Failed to eglDestroyContext(context.display, context.context)");
 		}
 
-		if(eglTerminate(display) == EGL_FALSE)
+		if(eglTerminate(context.display) == EGL_FALSE)
 		{
 			MGLError_Set("Failed to eglTerminate");
 		}

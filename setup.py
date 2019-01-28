@@ -51,7 +51,7 @@ if target in ['linux', 'cygwin']:
 
 libraries = {
     'windows': ['gdi32', 'opengl32', 'user32'],
-    'linux': ['GL', 'dl', 'X11'],
+    'linux': ['OpenGL','EGL'],
     'cygwin': ['GL', 'X11'],
     'darwin': [],
     'android': [],
