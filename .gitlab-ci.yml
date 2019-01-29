@@ -21,4 +21,4 @@ build_update_image:
   - docker push $IMAGE_PATH:latest
   artifacts:
     paths:
-      - *.whl
+    - moderngl-*.whl
