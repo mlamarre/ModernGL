@@ -18,7 +18,7 @@ namespace
 bool GLContext::load(bool standalone) {
     this->standalone = standalone;
 
-    EGLDisplay dpy = eglGetCurrentDisplay();
+    EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
     if (dpy == EGL_NO_DISPLAY) {
         PyErr_Format(moderngl_error, "cannot detect the display");
@@ -27,7 +27,7 @@ bool GLContext::load(bool standalone) {
 
     EGLint egl_major_ver;
     EGLint egl_minor_ver;
-    if(eglInitialize(display, &egl_major_ver, &egl_minor_ver) == EGL_FALSE)
+    if(eglInitialize(dpy, &egl_major_ver, &egl_minor_ver) == EGL_FALSE)
     {
         EGLint error = eglGetError();
         switch(error)
@@ -43,21 +43,21 @@ bool GLContext::load(bool standalone) {
         }
         return false;
     }
-    
+
     std::cout << "EGL version: " << egl_major_ver << "." << egl_minor_ver << std::endl;
 
-    char const * client_apis = eglQueryString(display, EGL_CLIENT_APIS);
+    char const * client_apis = eglQueryString(dpy, EGL_CLIENT_APIS);
     if(!client_apis)
     {
         PyErr_Format(moderngl_error,"Failed to eglQueryString(display, EGL_CLIENT_APIS)");
         return false;
     }
-    
+
     std::cout << "Supported client rendering APIs: " << client_apis << std::endl;
 
     EGLConfig config;
     EGLint    num_config;
-    if(eglChooseConfig(display, attrib_list, &config, 1, &num_config) == EGL_FALSE)
+    if(eglChooseConfig(dpy, attrib_list, &config, 1, &num_config) == EGL_FALSE)
     {
         PyErr_Format(moderngl_error,"Failed to eglChooseConfig");
         return false;
@@ -83,7 +83,7 @@ bool GLContext::load(bool standalone) {
         EGL_NONE
     };
 
-    EGLContext egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrib);
+    EGLContext egl_ctx = eglCreateContext(dpy, config, EGL_NO_CONTEXT, context_attrib);
     if(egl_ctx == EGL_NO_CONTEXT)
     {
         EGLint error =  eglGetError();
@@ -102,7 +102,7 @@ bool GLContext::load(bool standalone) {
         return false;
     }
 
-    if(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx) == EGL_FALSE)
+    if(eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx) == EGL_FALSE)
     {
         PyErr_Format(moderngl_error,"Failed to eglMakeCurrent");
         return false;
@@ -115,7 +115,7 @@ bool GLContext::load(bool standalone) {
     }
 
     this->window = nullptr; // no window!
-    this->display = (void *)display;
+    this->display = (void *)dpy;
     this->context = (void *)egl_ctx;
 
     return true;
