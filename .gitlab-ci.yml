@@ -1,0 +1,24 @@
+image: docker:git
+services:
+- docker:stable-dind
+before_script:
+- docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN registry.gitlab.ea.com
+stages:
+- build
+
+variables:
+  IMAGE_PATH: registry.gitlab.ea.com/mlamarre/moderngl/moderngl_egl_glvnd
+
+build_update_image:  
+  stage: build
+  variables:
+    IMAGE_VERSION: $CI_COMMIT_REF_SLUG-$CI_COMMIT_SHA
+  script:
+  - docker build --network=host --cache-from $IMAGE_PATH:latest -t $IMAGE_PATH:$IMAGE_VERSION .
+  - docker run --network=host -v $(pwd):/ModernGL/dist --rm -t $IMAGE_PATH:$IMAGE_VERSION
+  - docker push $IMAGE_PATH:$IMAGE_VERSION 
+  - docker tag $IMAGE_PATH:$IMAGE_VERSION $IMAGE_PATH:latest
+  - docker push $IMAGE_PATH:latest
+  artifacts:
+    paths:
+      - *.whl
