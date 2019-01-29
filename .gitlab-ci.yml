@@ -14,6 +14,7 @@ build_update_image:
   variables:
     IMAGE_VERSION: $CI_COMMIT_REF_SLUG-$CI_COMMIT_SHA
   script:
+  - docker pull $IMAGE_PATH:latest
   - docker build --network=host --cache-from $IMAGE_PATH:latest -t $IMAGE_PATH:$IMAGE_VERSION .
   - docker run --network=host -v $(pwd):/ModernGL/dist --rm -t $IMAGE_PATH:$IMAGE_VERSION
   - docker push $IMAGE_PATH:$IMAGE_VERSION 
