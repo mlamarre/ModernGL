@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y \
         x11proto-gl-dev \
         libegl1-mesa-dev \
         libglvnd-dev && \
-    pip3 install wheel && \
+    pip3 install wheel pypicloud[server] awscli twine && \
     rm -rf /var/lib/apt/lists/*
 
 ADD . /ModernGL
 WORKDIR /ModernGL
-ENTRYPOINT python3 setup.py bdist_wheel
+ENTRYPOINT python3 setup.py bdist_wheel && python3 upload_to_pypi_s3.py .

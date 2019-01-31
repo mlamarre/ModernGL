@@ -16,7 +16,7 @@ build_update_image:
   script:
   - docker pull $IMAGE_PATH:latest
   - docker build --network=host --cache-from $IMAGE_PATH:latest -t $IMAGE_PATH:$IMAGE_VERSION .
-  - docker run --network=host -v $(pwd):/ModernGL/dist --rm -t $IMAGE_PATH:$IMAGE_VERSION
+  - docker run --e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION=eu-east-1 -network=host -v $(pwd):/ModernGL/dist --rm -t $IMAGE_PATH:$IMAGE_VERSION
   - docker push $IMAGE_PATH:$IMAGE_VERSION 
   - docker tag $IMAGE_PATH:$IMAGE_VERSION $IMAGE_PATH:latest
   - docker push $IMAGE_PATH:latest
